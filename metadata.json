@@ -1,0 +1,5 @@
+{
+  "name": "Library Shift Swapper AI",
+  "description": "An intelligent tool to help swap shifts for part-time library workers. It uses AI to match employee availability with scheduling rules to create an optimal weekly schedule.",
+  "requestFramePermissions": []
+}
