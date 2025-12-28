@@ -3,10 +3,16 @@ import type { Shift, DayOfWeek } from '../types';
 import { DAYS_OF_WEEK, EMPLOYEES } from '../constants';
 
 const convertTo24Hour = (timeStr: string): string => {
-  const [time, ampm] = timeStr.split(' ');
-  let [hours, minutes] = time.split(':').map(Number);
+  const parts = timeStr.trim().split(' ');
+  if (parts.length < 2) return timeStr; // Fallback if no AM/PM
+
+  const ampm = parts[parts.length - 1].toUpperCase();
+  const timePart = parts[0];
+  let [hours, minutes] = timePart.split(':').map(Number);
+  
   if (ampm === 'PM' && hours < 12) hours += 12;
   if (ampm === 'AM' && hours === 12) hours = 0;
+  
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 };
 
@@ -17,7 +23,6 @@ export const parseLibraryCsv = (csvText: string): Shift[] => {
   const validNames = new Set(EMPLOYEES.map(e => e.name));
   const shifts: Shift[] = [];
 
-  // Remove header
   const dataLines = lines.slice(1);
 
   dataLines.forEach(line => {
@@ -37,23 +42,24 @@ export const parseLibraryCsv = (csvText: string): Shift[] => {
 
     const dayName = DAYS_OF_WEEK[date.getDay() === 0 ? 6 : date.getDay() - 1];
 
-    const namesInTitle = title.split(/[&]| and | with /i).map(n => {
+    // More aggressive name cleaning
+    const potentialNames = title.split(/[&]| and | with /i).map(n => {
       return n.replace(/\(.*?\)/g, '')
               .replace(/ covers lunch.*/gi, '')
               .replace(/ lunch coverage/gi, '')
               .replace(/ covers desk.*/gi, '')
               .replace(/ 1:1 .*/gi, '')
+              .replace(/[0-9: \-]+/g, '') // Remove lingering time strings inside names
               .trim();
     });
 
-    namesInTitle.forEach(name => {
+    potentialNames.forEach(name => {
       const matchedName = Array.from(validNames).find(vn => {
         const firstWord = name.split(' ')[0];
         return firstWord.toLowerCase() === vn.toLowerCase();
       });
       
       if (matchedName) {
-        // Store internally in 24h format for consistent comparison
         const startTime = convertTo24Hour(startTimeStr.replace(/:00 /g, ' '));
         const endTime = convertTo24Hour(endTimeStr.replace(/:00 /g, ' '));
 

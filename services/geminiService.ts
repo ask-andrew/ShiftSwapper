@@ -43,7 +43,9 @@ export const findSwapCandidates = async (
     - Check for double-booking conflicts for both parties.
     `}
 
-    Return exactly 4 options with accurate "currentHours" and "projectedHours" (calculated from the provided schedule context).
+    FORMATTING RULES:
+    - Always return times in US format (e.g. 9:00 AM - 5:00 PM) in the "tradeShift" description.
+    - Return exactly 4 options with accurate "currentHours" and "projectedHours" (calculated from the provided schedule context).
   `;
 
   const schema = {
@@ -55,7 +57,7 @@ export const findSwapCandidates = async (
         type: { type: Type.STRING, enum: ['Coverage', 'Trade'] },
         reason: { type: Type.STRING },
         confidence: { type: Type.NUMBER },
-        tradeShift: { type: Type.STRING, description: "Description of the shift(s) they would give in return if Trade" },
+        tradeShift: { type: Type.STRING, description: "Description of the shift(s) they would give in return if Trade (US TIME FORMAT ONLY)" },
         currentHours: { type: Type.NUMBER },
         projectedHours: { type: Type.NUMBER }
       },

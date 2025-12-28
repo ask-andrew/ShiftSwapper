@@ -69,12 +69,15 @@ export const EMPLOYEE_COLORS: { [key: string]: string } = {
 
 export const formatTimeAmPm = (time: string): string => {
     if (!time) return '';
-    // Use a clean check to prevent duplicate AM/PM
-    const normalized = time.replace(/\s*[AP]M\s*$/i, '');
-    const [hourStr, minuteStr] = normalized.split(':');
-    let hour = parseInt(hourStr, 10);
+    // Clean string of existing AM/PM to prevent double labels
+    const cleaned = time.replace(/\s*[AP]M\s*$/i, '');
+    const parts = cleaned.split(':');
+    if (parts.length < 2) return time;
+    
+    let hour = parseInt(parts[0], 10);
+    const minutes = parts[1].padStart(2, '0');
     const ampm = hour >= 12 ? 'PM' : 'AM';
     hour = hour % 12;
     hour = hour ? hour : 12;
-    return `${hour}:${minuteStr} ${ampm}`;
+    return `${hour}:${minutes} ${ampm}`;
 };

@@ -98,10 +98,15 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
   const handlePropose = (s: SwapSuggestion) => {
     const shiftsLabel = request.selectedShifts.map(rs => {
       const formattedDate = rs.date ? new Date(rs.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : rs.day;
-      return `${formattedDate} (${formatTimeAmPm(rs.startTime)}-${formatTimeAmPm(rs.endTime)})`;
+      return `${formattedDate} (${formatTimeAmPm(rs.startTime)} - ${formatTimeAmPm(rs.endTime)})`;
     }).join(' and ');
 
-    const text = `Hi ${s.candidateName}, this is ${request.name}. I'm looking for ${request.mode === 'Trade' ? 'a trade' : 'coverage'} for my shifts on ${shiftsLabel}. ${s.type === 'Trade' ? `Would you be open to swapping them for your ${s.tradeShift}?` : 'Would you be able to take those hours?'} It keeps our weekly totals balanced. Let me know!`;
+    // Clean up the AI's "tradeShift" to ensure it uses US format if it leaked 24h format
+    const cleanedTradeShift = s.tradeShift?.replace(/([01]?[0-9]|2[0-3]):([0-5][0-9])\s*-\s*([01]?[0-9]|2[0-3]):([0-5][0-9])/g, (match, h1, m1, h2, m2) => {
+      return `${formatTimeAmPm(`${h1}:${m1}`)} - ${formatTimeAmPm(`${h2}:${m2}`)}`;
+    });
+
+    const text = `Hi ${s.candidateName}, I'm looking for ${request.mode === 'Trade' ? 'a trade' : 'coverage'} for my shifts on ${shiftsLabel}. ${s.type === 'Trade' ? `Would you be open to swapping them for your ${cleanedTradeShift}?` : 'Would you be able to take those hours?'} It keeps our weekly totals balanced. Let me know!`;
     
     setProposal(text);
     navigator.clipboard.writeText(text);
@@ -120,7 +125,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Shift Concierge</h2>
-          <p className="text-slate-500 font-medium">Find your match. Protect your hours.</p>
+          <p className="text-slate-500 font-medium">Smart trades for the library team.</p>
         </div>
         <div className="flex p-1.5 bg-slate-100 rounded-2xl w-full md:w-auto">
           <button 
@@ -164,7 +169,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">2. Select Shift(s)</label>
               {request.selectedShifts.length > 0 && (
                 <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">
-                  {totalSelectedHours.toFixed(1)}h Selected
+                  {totalSelectedHours.toFixed(1)}h Total
                 </span>
               )}
             </div>
@@ -208,7 +213,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
             disabled={loading || request.selectedShifts.length === 0}
             className="w-full bg-indigo-600 text-white font-black py-5 rounded-[1.5rem] hover:bg-indigo-700 transition flex items-center justify-center gap-3 disabled:bg-slate-200 shadow-2xl shadow-indigo-100 group"
           >
-            {loading ? "Matching Schedules..." : <><SparklesIcon className="w-6 h-6 group-hover:rotate-12 transition-transform" /> Find Matches</>}
+            {loading ? "Matching Schedules..." : <><SparklesIcon className="w-6 h-6 group-hover:rotate-12 transition-transform" /> Find My Match</>}
           </button>
         </div>
 
@@ -218,21 +223,21 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
                <div className="w-20 h-20 bg-white rounded-3xl shadow-sm flex items-center justify-center mb-6">
                  <SparklesIcon className="w-10 h-10 text-slate-200" />
                </div>
-               <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">Concierge Ready</h3>
-               <p className="text-sm text-slate-400 max-w-xs font-medium">Select your shift(s) on the left to see who can help you cover them while staying balanced.</p>
+               <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">AI Concierge Ready</h3>
+               <p className="text-sm text-slate-400 max-w-xs font-medium">Select your shift(s) on the left to see who can trade or cover while staying balanced.</p>
              </div>
            )}
 
            {loading && (
              <div className="h-full space-y-6 animate-pulse">
-               {[1,2,3].map(i => <div key={i} className="h-32 bg-slate-100 rounded-[2rem]" />)}
+               {[1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-100 rounded-[2rem]" />)}
              </div>
            )}
 
            {suggestions.length > 0 && !loading && (
              <div className="space-y-6">
                 <div className="flex items-center justify-between px-2">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Smart Matches</h3>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Top Matches</h3>
                   <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Optimized</span>
                 </div>
                 {suggestions.map((s, i) => (
@@ -253,7 +258,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
                         <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Impact</div>
                         <div className="flex items-center gap-2 justify-end bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
                           <span className={`text-xs font-black ${s.projectedHours < MIN_PT_HOURS ? 'text-orange-500' : 'text-indigo-600'}`}>
-                            {s.projectedHours}h
+                            {s.projectedHours}h total
                           </span>
                         </div>
                       </div>
@@ -263,7 +268,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
 
                     {s.tradeShift && (
                       <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-6">
-                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">They give you:</span>
+                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Their shift:</span>
                         <div className="text-xs font-black text-slate-800">{s.tradeShift}</div>
                       </div>
                     )}
@@ -272,7 +277,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
                       onClick={() => handlePropose(s)}
                       className="w-full py-4 bg-slate-900 text-white rounded-[1.2rem] text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                     >
-                      {copyFeedback ? "Copied Message!" : "Propose this Swap"}
+                      {copyFeedback ? "Template Copied!" : "Propose this Swap"}
                     </button>
                   </div>
                 ))}
@@ -286,7 +291,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
            <div className="flex justify-between items-center mb-4">
              <div className="flex items-center gap-2">
                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
-               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Message Generated & Copied</h3>
+               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Message Template (Auto-Copied)</h3>
              </div>
              <button onClick={() => setProposal(null)} className="text-slate-500 hover:text-white transition">
                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -303,7 +308,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
              }}
              className="w-full bg-white text-slate-900 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-100 transition"
            >
-             {copyFeedback ? "Copied Again!" : "Copy Template Again"}
+             {copyFeedback ? "Copied!" : "Re-copy to Clipboard"}
            </button>
         </div>
       )}
