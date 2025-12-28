@@ -26,9 +26,10 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
   const [proposal, setProposal] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
-  const availableShifts = useMemo(() => {
-    if (!currentSchedule || !request.name) return [];
-    const shifts: Shift[] = [];
+  // Group user shifts by date for easier multi-selection
+  const groupedShifts = useMemo(() => {
+    if (!currentSchedule || !request.name) return {};
+    const groups: Record<string, { label: string, date: string, shifts: Shift[] }> = {};
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
@@ -37,18 +38,28 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
       dayShifts?.forEach(s => {
         if (s.employeeName.toLowerCase() === request.name.toLowerCase()) {
           if (s.dateObj && s.dateObj >= today) {
-            shifts.push(s);
+            const key = s.date || s.day;
+            if (!groups[key]) {
+              groups[key] = {
+                date: s.date || '',
+                label: s.dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+                shifts: []
+              };
+            }
+            groups[key].shifts.push(s);
           }
         }
       });
     });
 
-    return shifts.sort((a, b) => {
-      const dateA = a.dateObj?.getTime() || 0;
-      const dateB = b.dateObj?.getTime() || 0;
-      if (dateA !== dateB) return dateA - dateB;
-      return a.startTime.localeCompare(b.startTime);
-    });
+    // Sort dates
+    return Object.fromEntries(
+      Object.entries(groups).sort((a, b) => {
+        const dateA = a[1].shifts[0].dateObj?.getTime() || 0;
+        const dateB = b[1].shifts[0].dateObj?.getTime() || 0;
+        return dateA - dateB;
+      })
+    );
   }, [currentSchedule, request.name]);
 
   useEffect(() => {
@@ -78,6 +89,24 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
     setProposal(null);
   };
 
+  const selectWholeDay = (shifts: Shift[]) => {
+    const allSelected = shifts.every(s => request.selectedShifts.some(rs => rs.date === s.date && rs.startTime === s.startTime));
+    if (allSelected) {
+      setRequest(prev => ({
+        ...prev,
+        selectedShifts: prev.selectedShifts.filter(rs => !shifts.some(s => s.date === rs.date && s.startTime === rs.startTime))
+      }));
+    } else {
+      const newShifts = [...request.selectedShifts];
+      shifts.forEach(s => {
+        if (!newShifts.some(rs => rs.date === s.date && rs.startTime === s.startTime)) {
+          newShifts.push(s);
+        }
+      });
+      setRequest(prev => ({ ...prev, selectedShifts: newShifts }));
+    }
+  };
+
   const handleFindSwaps = async () => {
     setLoading(true);
     setProposal(null);
@@ -96,12 +125,13 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
   };
 
   const handlePropose = (s: SwapSuggestion) => {
+    // Generate dates label e.g., "Jan 10 (9:00 AM - 1:00 PM) and Jan 10 (1:00 PM - 5:00 PM)"
     const shiftsLabel = request.selectedShifts.map(rs => {
       const formattedDate = rs.date ? new Date(rs.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : rs.day;
       return `${formattedDate} (${formatTimeAmPm(rs.startTime)} - ${formatTimeAmPm(rs.endTime)})`;
     }).join(' and ');
 
-    // Clean up the AI's "tradeShift" to ensure it uses US format if it leaked 24h format
+    // Normalize AI-suggested trade shift to US format
     const cleanedTradeShift = s.tradeShift?.replace(/([01]?[0-9]|2[0-3]):([0-5][0-9])\s*-\s*([01]?[0-9]|2[0-3]):([0-5][0-9])/g, (match, h1, m1, h2, m2) => {
       return `${formatTimeAmPm(`${h1}:${m1}`)} - ${formatTimeAmPm(`${h2}:${m2}`)}`;
     });
@@ -121,11 +151,11 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
   }, 0);
 
   return (
-    <div className="bg-white p-8 rounded-[2rem] shadow-2xl mt-6 border border-slate-100 max-w-5xl mx-auto overflow-hidden pb-24 relative">
+    <div className="bg-white p-8 rounded-[2rem] shadow-2xl mt-6 border border-slate-100 max-w-5xl mx-auto overflow-hidden pb-24 relative min-h-[600px]">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Shift Concierge</h2>
-          <p className="text-slate-500 font-medium">Smart trades for the library team.</p>
+          <p className="text-slate-500 font-medium italic">Balanced swaps for the part-time team.</p>
         </div>
         <div className="flex p-1.5 bg-slate-100 rounded-2xl w-full md:w-auto">
           <button 
@@ -146,7 +176,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         <div className="lg:col-span-5 space-y-8">
           <section>
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">1. Identify Yourself</label>
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">1. Who are you?</label>
             <div className="grid grid-cols-3 gap-2">
               {swappableStaff.map(e => (
                 <button
@@ -173,36 +203,48 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
                 </span>
               )}
             </div>
-            {availableShifts.length > 0 ? (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {availableShifts.map((s, idx) => {
-                  const isSelected = request.selectedShifts.some(rs => rs.date === s.date && rs.startTime === s.startTime);
-                  const dateLabel = s.dateObj ? s.dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : s.day;
+            {Object.keys(groupedShifts).length > 0 ? (
+              <div className="space-y-6 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+                {Object.values(groupedShifts).map((group, groupIdx) => {
+                  const allInDaySelected = group.shifts.every(s => request.selectedShifts.some(rs => rs.date === s.date && rs.startTime === s.startTime));
                   return (
-                    <button
-                      key={idx}
-                      onClick={() => toggleShift(s)}
-                      className={`w-full flex justify-between items-center p-4 rounded-2xl border-2 transition-all group ${isSelected ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-slate-50 text-slate-600 border-transparent hover:bg-slate-100'}`}
-                    >
-                      <div className="text-left">
-                        <span className={`block text-[10px] font-black uppercase mb-1 ${isSelected ? 'opacity-60' : 'opacity-40'}`}>{dateLabel}</span>
-                        <span className="text-sm font-black">{formatTimeAmPm(s.startTime)} - {formatTimeAmPm(s.endTime)}</span>
-                      </div>
-                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center border-2 transition-all ${isSelected ? 'bg-indigo-500 border-indigo-400' : 'bg-white border-slate-200 group-hover:border-indigo-200'}`}>
-                        {isSelected && (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
+                    <div key={groupIdx} className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                      <div className="flex justify-between items-center mb-3 px-1">
+                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">{group.label}</span>
+                        {group.shifts.length > 1 && (
+                          <button 
+                            onClick={() => selectWholeDay(group.shifts)}
+                            className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg transition-colors ${allInDaySelected ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50'}`}
+                          >
+                            {allInDaySelected ? 'Selected All' : 'Select Day'}
+                          </button>
                         )}
                       </div>
-                    </button>
+                      <div className="space-y-1.5">
+                        {group.shifts.map((s, idx) => {
+                          const isSelected = request.selectedShifts.some(rs => rs.date === s.date && rs.startTime === s.startTime);
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => toggleShift(s)}
+                              className={`w-full flex justify-between items-center p-3 rounded-2xl border-2 transition-all ${isSelected ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-transparent hover:border-indigo-100'}`}
+                            >
+                              <span className="text-xs font-black">{formatTimeAmPm(s.startTime)} - {formatTimeAmPm(s.endTime)}</span>
+                              <div className={`w-4 h-4 rounded-full flex items-center justify-center border-2 ${isSelected ? 'bg-indigo-400 border-indigo-400' : 'bg-slate-100 border-slate-200'}`}>
+                                {isSelected && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
             ) : (
               <div className="p-10 text-center bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
                 <p className="text-xs text-slate-400 font-bold italic leading-relaxed">
-                  {request.name ? "No upcoming shifts found." : "Select your name to see your schedule."}
+                  {request.name ? "No upcoming shifts found." : "Pick your name to see your shifts."}
                 </p>
               </div>
             )}
@@ -223,8 +265,8 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
                <div className="w-20 h-20 bg-white rounded-3xl shadow-sm flex items-center justify-center mb-6">
                  <SparklesIcon className="w-10 h-10 text-slate-200" />
                </div>
-               <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">AI Concierge Ready</h3>
-               <p className="text-sm text-slate-400 max-w-xs font-medium">Select your shift(s) on the left to see who can trade or cover while staying balanced.</p>
+               <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">AI Matching Ready</h3>
+               <p className="text-sm text-slate-400 max-w-xs font-medium">Select your shift(s) to find candidates who can help. Works great for double shifts!</p>
              </div>
            )}
 
@@ -268,7 +310,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
 
                     {s.tradeShift && (
                       <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-6">
-                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Their shift:</span>
+                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Trade Shift:</span>
                         <div className="text-xs font-black text-slate-800">{s.tradeShift}</div>
                       </div>
                     )}
@@ -291,7 +333,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
            <div className="flex justify-between items-center mb-4">
              <div className="flex items-center gap-2">
                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
-               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Message Template (Auto-Copied)</h3>
+               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Message Copied to Clipboard</h3>
              </div>
              <button onClick={() => setProposal(null)} className="text-slate-500 hover:text-white transition">
                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -300,16 +342,19 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, csvContext,
              </button>
            </div>
            <p className="text-sm font-bold leading-relaxed mb-4 text-slate-200 italic">"{proposal}"</p>
-           <button 
-             onClick={() => {
-               navigator.clipboard.writeText(proposal);
-               setCopyFeedback(true);
-               setTimeout(() => setCopyFeedback(false), 2000);
-             }}
-             className="w-full bg-white text-slate-900 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-100 transition"
-           >
-             {copyFeedback ? "Copied!" : "Re-copy to Clipboard"}
-           </button>
+           <div className="flex gap-2">
+             <button 
+               onClick={() => {
+                 navigator.clipboard.writeText(proposal);
+                 setCopyFeedback(true);
+                 setTimeout(() => setCopyFeedback(false), 2000);
+               }}
+               className="flex-1 bg-white text-slate-900 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-100 transition"
+             >
+               {copyFeedback ? "Copied!" : "Copy Again"}
+             </button>
+             <button onClick={() => setProposal(null)} className="px-6 bg-slate-800 text-slate-400 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:text-white transition">Dismiss</button>
+           </div>
         </div>
       )}
     </div>
