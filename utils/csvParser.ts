@@ -3,8 +3,11 @@ import type { Shift, DayOfWeek } from '../types';
 import { DAYS_OF_WEEK, EMPLOYEES } from '../constants';
 
 const convertTo24Hour = (timeStr: string): string => {
-  // Normalize: ensure space before AM/PM (e.g., 1:00PM -> 1:00 PM)
-  const normalized = timeStr.trim().replace(/(\d+:[0-9:]+)(AM|PM)/i, '$1 $2');
+  // Normalize: ensure space before AM/PM and handle seconds (e.g., 1:00:00PM -> 1:00 PM)
+  const normalized = timeStr.trim()
+    .replace(/(\d+:\d+:\d+)(AM|PM)/i, '$1 $2') // Add space if missing
+    .replace(/:00\s/g, ' '); // Strip seconds for cleaner HH:mm
+    
   const parts = normalized.split(' ');
   if (parts.length < 2) return timeStr;
 
@@ -36,40 +39,32 @@ export const parseLibraryCsv = (csvText: string): Shift[] => {
     const startTimeStr = parts[2].replace(/"/g, '').trim();
     const endTimeStr = parts[4].replace(/"/g, '').trim();
 
-    if (!title || parts[5]?.toLowerCase().includes('true')) return;
-    if (title.toLowerCase().includes('closed') || title.toLowerCase().includes('birthday')) return;
+    // Ignore placeholders or special events
+    if (!title || title.toLowerCase().includes('closed') || title.toLowerCase().includes('coverage') || title.toLowerCase().includes('meeting')) return;
 
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return;
 
     const dayName = DAYS_OF_WEEK[date.getDay() === 0 ? 6 : date.getDay() - 1];
 
-    // Clean name logic: Handle symbols, parentheses, and text like "Julie(1:00)"
+    // Aggressive name extraction to find Danielle, Andrew, etc. in "Andrew & Charlie (1:00)"
     const potentialNames = title.split(/[&]| and | with /i).map(n => {
       return n.replace(/\(.*?\)/g, '')
-              .replace(/ covers lunch.*/gi, '')
-              .replace(/ lunch coverage/gi, '')
-              .replace(/ covers desk.*/gi, '')
-              .replace(/ 1:1 .*/gi, '')
-              .replace(/[^a-zA-Z\s]/g, ' ') // Strip remaining numbers/punctuation
+              .replace(/[^a-zA-Z\s]/g, ' ') 
               .trim();
     });
 
     potentialNames.forEach(namePart => {
-      // Find exact matches for employee names
       const matchedName = Array.from(validNames).find(vn => {
         const words = namePart.split(/\s+/);
         return words.some(w => w.toLowerCase() === vn.toLowerCase());
       });
       
       if (matchedName) {
-        const startTime = convertTo24Hour(startTimeStr.replace(/:00 /g, ' '));
-        const endTime = convertTo24Hour(endTimeStr.replace(/:00 /g, ' '));
-
         shifts.push({
           day: dayName as DayOfWeek,
-          startTime,
-          endTime,
+          startTime: convertTo24Hour(startTimeStr),
+          endTime: convertTo24Hour(endTimeStr),
           employeeName: matchedName,
           date: dateStr,
           dateObj: date
