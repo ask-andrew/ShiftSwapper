@@ -125,6 +125,45 @@ const VacationCalendar: React.FC<{
   );
 };
 
+const LoadingStateDisplay: React.FC = () => {
+  const loadingMessages = useMemo(() => [
+    { emoji: '📚', text: "A library is a hospital for the mind." },
+    { emoji: '💡', text: "Did you know the Library of Congress is the largest library in the world, with over 170 million items?" },
+    { emoji: '⏳', text: "Finding the perfect balance for everyone's schedule." },
+    { emoji: '🧠', text: "Librarians: The original search engines." },
+    { emoji: '✨', text: "Optimizing for happiness, one shift at a time." },
+    { emoji: '📖', text: "When in doubt, go to the library." },
+    { emoji: '🤔', text: "The Dewey Decimal System was invented in 1876 by Melvil Dewey." },
+    { emoji: '🗓️', text: "Crafting schedules that work for you and your team." },
+    { emoji: '☕', text: "Almost ready! Grab a coffee while we work our magic." },
+    { emoji: '🌍', text: "The first libraries date back to ancient Mesopotamia, almost 5,000 years ago!" },
+    { emoji: '🦉', text: "Knowledge is having the right answer. Intelligence is asking the right question. We're doing both!" },
+    { emoji: '🌟', text: "Every great library is a republic of letters." },
+    { emoji: '📜', text: "Some ancient libraries used clay tablets instead of books. Imagine the shelving!" },
+    { emoji: '🕰️', text: "Good things come to those who wait... for optimal shift matches!" },
+    { emoji: '🌿', text: "Just like a well-tended garden, a good schedule needs careful planning." },
+    { emoji: '🧩', text: "Fitting all the pieces together for a seamless week." },
+    { emoji: '🖋️', text: "Behind every well-organized system is a touch of genius." },
+    { emoji: '🚀', text: "Launching the best possible shifts into your future!" },
+    { emoji: '🌈', text: "Bringing color and order to complex schedules." },
+  ], []);
+
+  const [currentMessage, setCurrentMessage] = useState(loadingMessages[0]);
+
+  useEffect(() => {
+    setCurrentMessage(loadingMessages[Math.floor(Math.random() * loadingMessages.length)]);
+  }, [loadingMessages]);
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center bg-[#FBFBFC] rounded-[3.5rem] border-2 border-dashed border-slate-100 p-16 text-center animate-pop">
+      <span className="text-6xl mb-8 animate-float">{currentMessage.emoji}</span>
+      <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tighter">Matching Team Availability...</h3>
+      <p className="text-sm text-slate-400 max-w-xs font-medium leading-relaxed italic">"{currentMessage.text}"</p>
+    </div>
+  );
+};
+
+
 const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShiftFromCalendar, currentSchedule }) => {
   const swappableStaff = EMPLOYEES.filter(e => e.employeeType !== 'Full-time');
   const [request, setRequest] = useState({
@@ -138,7 +177,8 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
   const [loading, setLoading] = useState(false);
   const [proposal, setProposal] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [coveragePlan, setCoveragePlan] = useState<Record<number, string>>({});
+  const [coveragePlan, setCoveragePlan] = useState<Record<number, string>>({}); // For vacation mode
+  const [selectedTradeSuggestion, setSelectedTradeSuggestion] = useState<SwapSuggestion | null>(null); // For trade mode
 
   const allShiftsForPerson = useMemo(() => {
     if (!currentSchedule || !request.name) return [];
@@ -171,7 +211,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     dayName: DayOfWeek;
     shifts: Shift[];
     dateObj: Date;
-    originalIndices: number[]; // Indices of these shifts in request.selectedShifts
+    originalIndices: number[]; // Indices of these shifts in request.selectedShifts (for vacation mode) or allShiftsForPerson (for non-vacation mode)
   }
 
   const groupedShifts = useMemo<ShiftGroup[]>(() => {
@@ -184,8 +224,9 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     const shiftsToGroup = request.isVacation ? request.selectedShifts : allShiftsForPerson;
 
     shiftsToGroup.forEach((s, idx) => {
-      if (s.dateObj && s.dateObj >= today) { // Only show future shifts
-        const key = s.date || s.day;
+      // Ensure dateObj exists and is a valid future date
+      if (s.dateObj && s.dateObj.getTime() >= today.getTime() && !isNaN(s.dateObj.getTime())) {
+        const key = s.date || s.day; // Use date string as key for unique grouping
         if (!groups[key]) {
           groups[key] = {
             date: s.date || '',
@@ -197,8 +238,6 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
           };
         }
         groups[key].shifts.push(s);
-        // If in vacation mode, map back to request.selectedShifts index
-        // Otherwise, map to allShiftsForPerson index (which is currently not used for coverage plan)
         groups[key].originalIndices.push(request.isVacation ? idx : allShiftsForPerson.indexOf(s));
       }
     });
@@ -232,11 +271,12 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     }
     setSuggestions([]);
     setProposal(null);
+    setSelectedTradeSuggestion(null); // Clear any specific trade proposal
   };
 
   const selectWholeDay = (shifts: Shift[]) => {
-    const allSelectedInDay = shifts.every(s => request.selectedShifts.some(rs => areShiftsEqual(rs, s)));
-    if (allSelectedInDay) {
+    const allInDaySelected = shifts.every(s => request.selectedShifts.some(rs => areShiftsEqual(rs, s)));
+    if (allInDaySelected) {
       setRequest(prev => ({
         ...prev,
         selectedShifts: prev.selectedShifts.filter(rs => !shifts.some(s => areShiftsEqual(rs, s)))
@@ -254,6 +294,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     }
     setSuggestions([]);
     setProposal(null);
+    setSelectedTradeSuggestion(null); // Clear any specific trade proposal
   };
 
 
@@ -261,6 +302,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     if (!start) {
       setRequest(prev => ({ ...prev, selectedShifts: [] }));
       setCoveragePlan({});
+      setSelectedTradeSuggestion(null); // Clear specific trade
       return;
     }
     const finalEnd = end || start;
@@ -272,11 +314,13 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     setRequest(prev => ({ ...prev, selectedShifts: filtered }));
     setCoveragePlan({});
     setSuggestions([]);
+    setSelectedTradeSuggestion(null); // Clear specific trade
   };
 
   const handleFindSwaps = async () => {
     setLoading(true);
     setProposal(null);
+    setSelectedTradeSuggestion(null); // Clear any specific trade proposal
     try {
       const results = await findSwapCandidates({
         name: request.name,
@@ -293,6 +337,8 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
   };
 
   const addToPlan = (candidate: string, reason: string) => {
+    if (!request.isVacation) return; // Only for vacation mode (coverage)
+
     const newPlan = { ...coveragePlan };
     // The reason string from AI is used to infer which shifts the candidate can cover.
     // In a real advanced implementation, the AI would return specific shift indices.
@@ -311,7 +357,9 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     setCoveragePlan(newPlan);
   };
 
-  const handleProposePlan = () => {
+  const handleProposeCoveragePlan = () => {
+    if (!request.isVacation) return; // Only for vacation mode
+
     const assignments: Record<string, string[]> = {};
     (Object.entries(coveragePlan) as [string, string][]).forEach(([idx, name]) => {
       const s = request.selectedShifts[parseInt(idx)];
@@ -327,6 +375,20 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     setCopyFeedback(true);
     setTimeout(() => setCopyFeedback(false), 2000);
   };
+
+  const handleProposeSpecificSwap = (suggestion: SwapSuggestion) => {
+    setSelectedTradeSuggestion(suggestion);
+    const shiftsGiven = request.selectedShifts.map(s => 
+      `${s.dateObj?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${formatTimeAmPm(s.startTime)} – ${formatTimeAmPm(s.endTime)})`
+    ).join(' and ');
+    
+    const tradeMessage = `Hi ${suggestion.candidateName},\n\nI'm looking to swap my shift(s):\n${shiftsGiven}\n\nBooker suggests a trade with you for:\n${suggestion.tradeShift}\n\nWould this work for you? Let me know!`;
+    setProposal(tradeMessage);
+    navigator.clipboard.writeText(tradeMessage);
+    setCopyFeedback(true);
+    setTimeout(() => setCopyFeedback(false), 2000);
+  };
+
 
   const totalSelectedHours = useMemo(() => calculateNetSelectedHours(request.selectedShifts), [request.selectedShifts]);
   const coveredCount = Object.keys(coveragePlan).length;
@@ -367,7 +429,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.25em] mb-5">1. Select Staff</label>
             <div className="grid grid-cols-3 gap-2.5">
               {swappableStaff.map(e => (
-                <button key={e.id} onClick={() => { setRequest({...request, name: e.name, selectedShifts: []}); setSuggestions([]); setCoveragePlan({}); }}
+                <button key={e.id} onClick={() => { setRequest({...request, name: e.name, selectedShifts: []}); setSuggestions([]); setCoveragePlan({}); setSelectedTradeSuggestion(null); }}
                   className={`py-3.5 text-xs font-black rounded-2xl border-2 transition-all ${request.name === e.name ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xl' : 'bg-white text-slate-500 border-slate-50 hover:border-indigo-100'}`}
                 >
                   {e.name}
@@ -492,11 +554,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
              </div>
            )}
 
-           {loading && (
-             <div className="h-full space-y-6">
-               {[1,2,3,4].map(i => <div key={i} className="h-40 bg-slate-50 rounded-[3rem] animate-pulse" />)}
-             </div>
-           )}
+           {loading && <LoadingStateDisplay />}
 
            {suggestions.length > 0 && !loading && (
              <div className="space-y-6">
@@ -516,14 +574,14 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
                       </div>
                     </div>
                     <p className="text-sm text-slate-500 font-medium mb-7 italic border-l-4 border-indigo-100 pl-4">"{s.reason}"</p>
-                    <button onClick={() => addToPlan(s.candidateName, s.reason)} className="w-full py-4.5 bg-slate-900 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-2">
+                    <button onClick={() => request.isVacation ? addToPlan(s.candidateName, s.reason) : handleProposeSpecificSwap(s)} className="w-full py-4.5 bg-slate-900 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-2">
                       {request.isVacation ? 'Assign to Shifts' : 'Propose this Swap'}
                     </button>
                   </div>
                 ))}
                 
-                {coveredCount > 0 && (
-                  <button onClick={handleProposePlan} className="w-full py-6 bg-emerald-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-2xl transition-all animate-pop">
+                {request.isVacation && coveredCount > 0 && ( // Only show Assemble Message Draft in Vacation Mode
+                  <button onClick={handleProposeCoveragePlan} className="w-full py-6 bg-emerald-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-2xl transition-all animate-pop">
                     Assemble Message Draft ({coveredCount}/{totalCount})
                   </button>
                 )}

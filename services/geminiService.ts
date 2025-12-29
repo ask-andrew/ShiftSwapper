@@ -39,6 +39,9 @@ export const findSwapCandidates = async (
     - Ensure they aren't working during these specific times.
     ` : `
     - Look for someone who has shifts on DIFFERENT days that the requester could take in return.
+    - Prioritize trades within the same calendar week.
+    - If no suitable same-week trades, consider shifts in the immediate following week.
+    - A trade can involve a single shift or a combination of shifts that total equivalent hours.
     - Propose a trade that keeps both parties near their hour targets.
     - Check for double-booking conflicts for both parties.
     `}
