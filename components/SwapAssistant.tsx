@@ -165,28 +165,97 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
     return map;
   }, [allShiftsForPerson]);
 
-  const groupedShifts = useMemo(() => {
-    const groups: Record<string, { label: string, shifts: Shift[], indices: number[] }> = {};
-    request.selectedShifts.forEach((s, idx) => {
-      const key = s.date || s.day;
-      if (!groups[key]) {
-        groups[key] = {
-          label: s.dateObj?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) || '',
-          shifts: [],
-          indices: []
-        };
+  interface ShiftGroup {
+    label: string;
+    date: string; // MM/DD/YYYY
+    dayName: DayOfWeek;
+    shifts: Shift[];
+    dateObj: Date;
+    originalIndices: number[]; // Indices of these shifts in request.selectedShifts
+  }
+
+  const groupedShifts = useMemo<ShiftGroup[]>(() => {
+    const groups: Record<string, ShiftGroup> = {};
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // For non-vacation mode, show *all* future shifts for the selected employee
+    // For vacation mode, show only the `request.selectedShifts`
+    const shiftsToGroup = request.isVacation ? request.selectedShifts : allShiftsForPerson;
+
+    shiftsToGroup.forEach((s, idx) => {
+      if (s.dateObj && s.dateObj >= today) { // Only show future shifts
+        const key = s.date || s.day;
+        if (!groups[key]) {
+          groups[key] = {
+            date: s.date || '',
+            dayName: s.day,
+            label: s.dateObj?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) || '',
+            shifts: [],
+            dateObj: s.dateObj!,
+            originalIndices: []
+          };
+        }
+        groups[key].shifts.push(s);
+        // If in vacation mode, map back to request.selectedShifts index
+        // Otherwise, map to allShiftsForPerson index (which is currently not used for coverage plan)
+        groups[key].originalIndices.push(request.isVacation ? idx : allShiftsForPerson.indexOf(s));
       }
-      groups[key].shifts.push(s);
-      groups[key].indices.push(idx);
     });
-    return Object.values(groups).sort((a, b) => (a.shifts[0].dateObj?.getTime() || 0) - (b.shifts[0].dateObj?.getTime() || 0));
-  }, [request.selectedShifts]);
+    return Object.values(groups).sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+  }, [request.selectedShifts, allShiftsForPerson, request.isVacation]);
 
   useEffect(() => {
     if (selectedShiftFromCalendar) {
       setRequest(prev => ({ ...prev, name: selectedShiftFromCalendar.employeeName, selectedShifts: [selectedShiftFromCalendar] }));
     }
   }, [selectedShiftFromCalendar]);
+
+  const areShiftsEqual = (s1: Shift, s2: Shift) => {
+    const key1 = s1.date || s1.day;
+    const key2 = s2.date || s2.day;
+    return key1 === key2 && s1.startTime === s2.startTime && s1.endTime === s2.endTime;
+  };
+
+  const toggleShift = (shift: Shift) => {
+    const isSelected = request.selectedShifts.some(s => areShiftsEqual(s, shift));
+    if (isSelected) {
+      setRequest(prev => ({
+        ...prev,
+        selectedShifts: prev.selectedShifts.filter(s => !areShiftsEqual(s, shift))
+      }));
+    } else {
+      setRequest(prev => ({
+        ...prev,
+        selectedShifts: [...prev.selectedShifts, shift]
+      }));
+    }
+    setSuggestions([]);
+    setProposal(null);
+  };
+
+  const selectWholeDay = (shifts: Shift[]) => {
+    const allSelectedInDay = shifts.every(s => request.selectedShifts.some(rs => areShiftsEqual(rs, s)));
+    if (allSelectedInDay) {
+      setRequest(prev => ({
+        ...prev,
+        selectedShifts: prev.selectedShifts.filter(rs => !shifts.some(s => areShiftsEqual(rs, s)))
+      }));
+    } else {
+      setRequest(prev => {
+        const currentSelection = [...prev.selectedShifts];
+        shifts.forEach(s => {
+          if (!currentSelection.some(rs => areShiftsEqual(rs, s))) {
+            currentSelection.push(s);
+          }
+        });
+        return { ...prev, selectedShifts: currentSelection };
+      });
+    }
+    setSuggestions([]);
+    setProposal(null);
+  };
+
 
   const handleSelectRange = (start: Date | null, end: Date | null) => {
     if (!start) {
@@ -225,12 +294,18 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
 
   const addToPlan = (candidate: string, reason: string) => {
     const newPlan = { ...coveragePlan };
+    // The reason string from AI is used to infer which shifts the candidate can cover.
+    // In a real advanced implementation, the AI would return specific shift indices.
     request.selectedShifts.forEach((s, idx) => {
       const dateStr = s.dateObj?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      if (dateStr && reason.includes(dateStr)) {
+      const timeRange = `${formatTimeAmPm(s.startTime)} – ${formatTimeAmPm(s.endTime)}`;
+
+      // Try to match based on date and time, or if the reason is very general ("all", "entire week")
+      if ((dateStr && reason.includes(dateStr) && reason.includes(timeRange.split(' ')[0])) || reason.toLowerCase().includes("all shifts") || reason.toLowerCase().includes("entire week")) {
         newPlan[idx] = candidate;
-      } else if (!Object.keys(coveragePlan).length || reason.toLowerCase().includes("all")) {
-        if (!newPlan[idx]) newPlan[idx] = candidate;
+      } else if (reason.toLowerCase().includes(dateStr?.toLowerCase() || '')) {
+        // Fallback: if reason mentions the date, assign it
+        newPlan[idx] = candidate;
       }
     });
     setCoveragePlan(newPlan);
@@ -324,7 +399,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
                         <div key={gIdx} className="space-y-2">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">{group.label}</span>
                           {group.shifts.map((s, sIdx) => {
-                            const originalIdx = group.indices[sIdx];
+                            const originalIdx = group.originalIndices[sIdx];
                             const assigned = coveragePlan[originalIdx];
                             return (
                               <div key={sIdx} className={`flex justify-between items-center p-3 rounded-xl border transition-all ${assigned ? 'bg-emerald-50 border-emerald-100 shadow-sm' : 'bg-white border-slate-200 shadow-xs'}`}>
@@ -345,9 +420,55 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 text-center text-slate-400 italic font-bold">
-                   Select shifts directly from the Active Schedule to trade.
+              ) : ( // Non-vacation mode: show upcoming shifts for selection
+                <div className="space-y-4 max-h-[550px] overflow-y-auto pr-3 custom-scrollbar">
+                  {groupedShifts.map((group, groupIdx) => {
+                    const allInDaySelected = group.shifts.every(s => request.selectedShifts.some(rs => areShiftsEqual(rs, s)));
+                    const libHours = LIBRARY_HOURS[group.dayName] || { open: 9, close: 21 };
+                    const totalRange = (libHours.close - libHours.open) * 60;
+
+                    return (
+                      <div key={groupIdx} className="bg-[#FBFBFC] p-6 rounded-[2.5rem] border border-slate-100 transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-100 group">
+                        <div className="flex justify-between items-center mb-6">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-slate-900 tracking-tight">{group.label}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{group.dayName}</span>
+                          </div>
+                          <button 
+                            onClick={() => selectWholeDay(group.shifts)}
+                            className={`text-[9px] font-black uppercase px-4 py-2 rounded-xl transition-all ${allInDaySelected ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-100 hover:text-indigo-600 shadow-sm'}`}
+                          >
+                            {allInDaySelected ? 'Deselect Day' : 'Select Day'}
+                          </button>
+                        </div>
+
+                        <div className="relative h-14 bg-slate-100/50 rounded-2xl mb-4 p-1 overflow-hidden">
+                          <div className="absolute inset-0 flex justify-between px-4 items-center pointer-events-none opacity-20">
+                            <span className="text-[8px] font-black">{libHours.open} AM</span>
+                            <span className="text-[8px] font-black">{libHours.close > 12 ? libHours.close - 12 : libHours.close} {libHours.close >= 12 ? 'PM' : 'AM'}</span>
+                          </div>
+                          {group.shifts.map((s, idx) => {
+                            const startMin = timeToMinutes(s.startTime);
+                            const endMin = timeToMinutes(s.endTime);
+                            const left = ((startMin - libHours.open * 60) / totalRange) * 100;
+                            const width = ((endMin - startMin) / totalRange) * 100;
+                            const isSelected = request.selectedShifts.some(rs => areShiftsEqual(rs, s));
+                            return (
+                              <button key={idx} onClick={(e) => { e.stopPropagation(); toggleShift(s); }} style={{ left: `${left}%`, width: `${width}%` }}
+                                className={`absolute top-1 bottom-1 rounded-xl transition-all duration-300 z-10 border-2 ${isSelected ? 'bg-slate-900 border-slate-800 shadow-lg scale-y-105 z-20' : 'bg-white border-slate-200 hover:border-indigo-400 hover:z-20'}`}
+                              >
+                                <div className={`w-full h-full flex flex-col items-center justify-center overflow-hidden px-1 ${isSelected ? 'text-white' : 'text-slate-400'}`}>
+                                  <span className="text-[8px] font-black leading-none truncate">{formatTimeAmPm(s.startTime).split(' ')[0]}</span>
+                                  <span className="text-[8px] font-black leading-none truncate opacity-50">–</span>
+                                  <span className="text-[8px] font-black leading-none truncate">{formatTimeAmPm(s.endTime).split(' ')[0]}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )
             ) : <div className="p-12 border-2 border-dashed border-slate-200 rounded-[2.5rem] text-center text-slate-400 italic">Select your name above.</div>}
@@ -356,16 +477,18 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
           <button onClick={handleFindSwaps} disabled={loading || request.selectedShifts.length === 0}
             className="w-full bg-indigo-600 text-white font-black py-6 rounded-[2rem] hover:bg-indigo-700 transition-all flex items-center justify-center gap-4 disabled:bg-slate-100 shadow-[0_24px_48px_-12px_rgba(79,70,229,0.3)]"
           >
-            {loading ? "Matching Team Availability..." : <><SparklesIcon className="w-6 h-6" /> Find Best Coverage Team</>}
+            {loading ? "Matching Team Availability..." : <><SparklesIcon className="w-6 h-6" /> {request.isVacation ? 'Find Best Coverage Team' : 'Find My Match'}</>}
           </button>
         </div>
 
         <div className="lg:col-span-6">
            {!suggestions.length && !loading && (
              <div className="h-full flex flex-col items-center justify-center bg-[#FBFBFC] rounded-[3.5rem] border-2 border-dashed border-slate-100 p-16 text-center">
-               <span className="text-6xl mb-8 animate-float">🌴</span>
-               <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tighter">Your Leave Concierge</h3>
-               <p className="text-sm text-slate-400 max-w-xs font-medium leading-relaxed italic">Select your leave range. I'll identify the best combination of Subs and colleagues to protect your weekly hours.</p>
+               <span className="text-6xl mb-8 animate-float">{request.isVacation ? '🌴' : '🦉'}</span>
+               <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tighter">{request.isVacation ? 'Your Leave Concierge' : 'Booker is waiting!'}</h3>
+               <p className="text-sm text-slate-400 max-w-xs font-medium leading-relaxed italic">
+                 {request.isVacation ? "Select your leave range. I'll identify the best combination of Subs and colleagues to protect your weekly hours." : "Select your shifts on the left. I'll search for trades that respect everyone's hour caps!"}
+               </p>
              </div>
            )}
 
@@ -394,7 +517,7 @@ const SwapAssistant: React.FC<SwapAssistantProps> = ({ currentRules, selectedShi
                     </div>
                     <p className="text-sm text-slate-500 font-medium mb-7 italic border-l-4 border-indigo-100 pl-4">"{s.reason}"</p>
                     <button onClick={() => addToPlan(s.candidateName, s.reason)} className="w-full py-4.5 bg-slate-900 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-2">
-                      Assign to Shifts
+                      {request.isVacation ? 'Assign to Shifts' : 'Propose this Swap'}
                     </button>
                   </div>
                 ))}
