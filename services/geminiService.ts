@@ -74,10 +74,12 @@ export const findSwapCandidates = async (
     }
   });
 
-  return JSON.parse(response.text);
+  // Extract text safely and handle potential undefined
+  const jsonStr = response.text || "[]";
+  return JSON.parse(jsonStr.trim());
 };
 
-export const analyzeCsvPatterns = async (csvText: string, employees: Employee[]) => {
+export const analyzeCsvPatterns = async (csvText: string, employees: Employee[]): Promise<{ suggestedRules: string[], inferredAvailability: any }> => {
   const prompt = `
     Analyze this library schedule CSV data:
     ---
@@ -98,13 +100,36 @@ export const analyzeCsvPatterns = async (csvText: string, employees: Employee[])
     Return a JSON object with suggestedRules (string[]) and inferredAvailability (object).
   `;
 
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      suggestedRules: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING }
+      },
+      inferredAvailability: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING }
+        },
+        required: ["summary"]
+      }
+    },
+    required: ["suggestedRules", "inferredAvailability"]
+  };
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
-    config: { responseMimeType: "application/json" }
+    config: { 
+      responseMimeType: "application/json",
+      responseSchema: schema
+    }
   });
 
-  return JSON.parse(response.text);
+  // Extract text safely and handle potential undefined
+  const jsonStr = response.text || '{"suggestedRules": [], "inferredAvailability": {"summary": ""}}';
+  return JSON.parse(jsonStr.trim());
 };
 
 export const generateSchedule = async (
@@ -172,5 +197,7 @@ export const generateSchedule = async (
     },
   });
 
-  return JSON.parse(response.text.trim()) as Schedule;
+  // Extract text safely and handle potential undefined
+  const jsonStr = response.text || "{}";
+  return JSON.parse(jsonStr.trim()) as Schedule;
 };
